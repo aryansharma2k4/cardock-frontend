@@ -53,6 +53,7 @@ export default function EntryForm({ onUpdate }) {
         });
         setVehicleNumber('');
         onUpdate();
+        
       } else {
         setStatusMessage({ type: 'error', message: data.message });
       }

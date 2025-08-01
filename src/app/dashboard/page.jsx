@@ -8,8 +8,10 @@ export default function DashboardPage() {
   const [sessions, setSessions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [slots, setSlots] = useState([]);
-
   const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
 
   const fetchAllSlots = async () => {
   try {
@@ -20,7 +22,6 @@ export default function DashboardPage() {
     console.error('Failed to fetch slots', err);
   }
 };
-
 
   const fetchParkingData = async () => {
     try {
@@ -48,12 +49,139 @@ export default function DashboardPage() {
     }
   };
 
+  const analyzeWithAI = async () => {
+    setIsAnalyzing(true);
+    try {
+      const totalSlots = slots.length;
+      const availableSlots = slots.filter(s => s.status === 'available').length;
+      const occupiedSlots = slots.filter(s => s.status === 'occupied').length;
+      const maintenanceSlots = slots.filter(s => s.status === 'maintenance').length;
+      const occupancyRate = totalSlots > 0 ? ((occupiedSlots / totalSlots) * 100).toFixed(1) : 0;
+
+      // Create comprehensive data object for analysis
+      const analysisData = {
+        totalRevenue: parkingData?.totalMoneyCollected || 0,
+        totalSlots: totalSlots,
+        occupancyRate: parseFloat(occupancyRate),
+        availableSlots: availableSlots,
+        occupiedSlots: occupiedSlots,
+        maintenanceSlots: maintenanceSlots,
+        slotTypes: {
+          regular: {
+            total: parkingData?.regularSlotAvailable?.length || 0,
+            available: parkingData?.regularEmptySlot || 0
+          },
+          compact: {
+            total: parkingData?.compactSlotAvailable?.length || 0,
+            available: parkingData?.compactEmptySlot || 0
+          },
+          ev: {
+            total: parkingData?.evSlotAvailable?.length || 0,
+            available: parkingData?.evEmptySlot || 0
+          },
+          handicap: {
+            total: parkingData?.handicapSlotAvailable?.length || 0,
+            available: parkingData?.handicapEmptySlot || 0
+          }
+        },
+        recentSessions: sessions.slice(0, 10).map(session => ({
+          vehicleNumber: session.parkVehicle?.number,
+          amount: session.amount,
+          status: session.status,
+          billingType: session.billingType,
+          entryTime: session.entryTime,
+          exitTime: session.exitTime,
+          slotName: session.parkSlot?.name
+        })),
+        sessionStats: {
+          totalSessions: sessions.length,
+          activeSessions: sessions.filter(s => s.status === 'active').length,
+          completedSessions: sessions.filter(s => s.status === 'completed').length,
+          cancelledSessions: sessions.filter(s => s.status === 'cancelled').length
+        }
+      };
+
+      const prompt = `
+You are an expert parking management analyst. Please analyze the following parking space data and provide comprehensive insights:
+
+PARKING FACILITY DATA:
+${JSON.stringify(analysisData, null, 2)}
+
+Please provide a detailed analysis covering:
+
+1. **Revenue Performance**:
+   - Current revenue status and trends
+   - Revenue optimization opportunities
+   - Pricing strategy recommendations
+
+2. **Occupancy Analysis**:
+   - Current occupancy patterns
+   - Peak usage insights
+   - Capacity utilization efficiency
+
+3. **Slot Type Performance**:
+   - Performance comparison across different slot types (Regular, Compact, EV, Handicap)
+   - Demand patterns for each slot type
+   - Recommendations for slot allocation optimization
+
+4. **Operational Insights**:
+   - Session management efficiency
+   - Customer behavior patterns
+   - Maintenance and availability concerns
+
+5. **Strategic Recommendations**:
+   - Short-term improvements (next 30 days)
+   - Medium-term optimizations (next 3 months)
+   - Long-term growth strategies
+
+6. **Key Performance Indicators**:
+   - Most important metrics to monitor
+   - Benchmark comparisons
+   - Success indicators
+
+7. **Risk Assessment**:
+   - Potential operational risks
+   - Revenue risks
+   - Mitigation strategies
+
+Please format your response in clear sections with actionable insights and specific recommendations and dont' use markdown for it give it in a simple text format. Focus on data-driven conclusions and practical next steps for parking facility management.
+      `;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.NEXT_PUBLIC_GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }]
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
+        setAiAnalysis(result.candidates[0].content.parts[0].text);
+        setShowAnalysis(true);
+      } else {
+        throw new Error('Invalid response from AI service');
+      }
+    } catch (error) {
+      console.error('AI Analysis failed:', error);
+      alert('Failed to generate AI analysis. Please check your API key and try again.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   useEffect(() => {
   fetchParkingData();
   fetchSessions();
   fetchAllSlots();
 }, []);
-
 
   if (isLoading) {
     return (
@@ -77,7 +205,6 @@ export default function DashboardPage() {
     const maintenanceSlots = slots.filter(s => s.status === 'maintenance').length;
     const totalEmptySlots = availableSlots;
     const occupancyRate = totalSlots > 0 ? ((occupiedSlots / totalSlots) * 100).toFixed(1) : 0;
-
 
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
@@ -103,20 +230,76 @@ export default function DashboardPage() {
       <div className="container mx-auto py-12 px-4 max-w-7xl">
         {/* Header Section */}
         <div className="mb-12">
-          <div className="flex items-center space-x-3 mb-4">
-            <div className="p-2 bg-blue-50 rounded-lg border border-blue-200">
-              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-blue-50 rounded-lg border border-blue-200">
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
+                Dashboard Overview
+              </h1>
             </div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
-              Dashboard Overview
-            </h1>
+            
+            {/* AI Analysis Button */}
+            <button
+              onClick={analyzeWithAI}
+              disabled={isAnalyzing}
+              className="flex items-center space-x-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              {isAnalyzing ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span>Analyzing...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  <span>Analyze with AI</span>
+                </>
+              )}
+            </button>
           </div>
           <p className="text-gray-600 text-lg">
             Real-time parking analytics and session management
           </p>
         </div>
+
+        {/* AI Analysis Modal */}
+        {showAnalysis && aiAnalysis && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl max-w-4xl max-h-[80vh] overflow-hidden shadow-2xl">
+              <div className="p-6 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-purple-50 to-blue-50">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-purple-100 rounded-lg">
+                    <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-xl font-bold text-gray-800">AI Parking Analysis</h2>
+                </div>
+                <button
+                  onClick={() => setShowAnalysis(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-6 overflow-y-auto max-h-[60vh]">
+                <div className="prose prose-gray max-w-none">
+                  <pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans leading-relaxed">
+                    {aiAnalysis}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Key Metrics Summary */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
@@ -325,6 +508,7 @@ function StatCard({ title, total, available, color, icon }) {
     purple: 'bg-violet-500',
     red: 'bg-rose-500'
   };
+
 
   return (
     <div className={`p-5 rounded-2xl border shadow-sm transition-all duration-300 hover:scale-[1.02] hover:shadow-md ${colorClasses[color]}`}>
